@@ -5,54 +5,53 @@
 pacman::p_load(rprojroot)
 root <- find_root(is_rstudio_project)
 
-year <- 2016 # between 1960 and 2016 in increments of 4
+files <- list.files(file.path(root,'R Data Files'), 
+                    pattern = '.Rdata',
+                    full.names = T)
 
-data <- load(file.path(root,'R Data Files',paste0('E',year,'.Rdata')))
+years <- substr(basename(files), 2, 5)
 
-debates <- unique(get(data)[['debate']])
+GOP <- data.frame(message = NULL, year = NULL, stringsAsFactors = F)
+DEM <- data.frame(message = NULL, year = NULL, stringsAsFactors = F)
 
-#subset all debates by party
-Repub <- get(data)[grep('2016R',get(data)[['debate']]),]
-Democ <- get(data)[grep('2016D',get(data)[['debate']]),]
+for(i in years){
+  
+  data <- load(file.path(root,'R Data Files',paste0('E',i,'.Rdata')))
+  cand <- subset(get(data), candidate == 1)
+  mess <- which(colnames(get(data)) == 'message')
+  elec <- which(colnames(get(data)) == 'election')
+  if(is.na(elec[1])) cand$election = i
+  elec <- which(colnames(cand) == 'election')
+  rep  <- subset(cand, party == 'R')
+  dem  <- subset(cand, party == 'D')
+  Rep  <- subset(rep, substr(debate,5,5) == "P")
+  Dem  <- subset(dem, substr(debate,5,5) == "P")
 
-# further subset comments made by candidate
-# remove comments made not moderators and others
-R_comments <- Repub[which(Repub[['candidate']] == 1),]
-D_comments <- Democ[which(Democ[['candidate']] == 1),]
-
-# Get Sentiments
-R_comm <- tibble(text = R_comments[['message']])
-R_comm %>%
-        unnest_tokens(word,text) %>%
-        inner_join(get_sentiments("bing"))  %>%
-        filter(sentiment %in% c("positive", "negative")) %>%
-        spread(sentiment, n, fill = 0) %>%
-        mutate(sentiment = positive - negative)
-        #mutate(sentiment = positive - negative) 
-
-for(i in 1:nrow(R_comments[1:10,])) {
-        
-        clean1 <- tibble(text = books[[i]][[1]])
-clean2 <- unnest_tokens(clean1, word, text)
-clean3 <- setDT(clean2)[, book := titles[i]]
-clean4 <- select(clean3, book, everything())
-
-        series <- rbind(series, clean4)
+  
+  GOP <- rbind(GOP, Rep[,c(mess,elec)])
+  DEM <- rbind(DEM, Dem[,c(mess,elec)])
+  
 }
 
+GOP$party = 'R'
+DEM$party = 'D'
+comm <- rbind(GOP, DEM)
 
-
-R_comments %>%
-        mutate(word_count = 1:n())       %>% 
-        inner_join(get_sentiments("bing"))           %>%
-        count(book, index = index , sentiment)       %>%
+# Get Sentiments
+comm %>% 
+     unnest_tokens(word,message) %>%
+      group_by(election, party) %>% 
+        mutate(word_count = 1:n(),
+               index = election)       %>% 
+        inner_join(get_sentiments("nrc"))           %>%
+        count(party, index = index , sentiment)       %>%
         ungroup()                                    %>%
         spread(sentiment, n, fill = 0)               %>%
-        mutate(sentiment = positive - negative,
-               book = factor(book, levels = titles)) %>%
-  
-        ggplot(aes(index, sentiment, fill = book)) +
+        mutate(sentiment = positive - negative) -> test3
+
+test3 %>%
+         ggplot(aes(index, sentiment, fill = party)) +
           geom_bar(alpha = 0.5, 
                    stat = "identity", 
                    show.legend = FALSE) +
-          facet_wrap(~ book, ncol = 2, scales = "free_x")
+          facet_wrap(~ party, ncol = 2, scales = "free_x")
